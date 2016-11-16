@@ -15,19 +15,36 @@
 
 
 // Hardware constants
+// CD4094 STROBE pin; shared by all of them
 #define REGISTER_STROBE_PIN 6
+// CD4094 DATA pin; fed only to the first one
 #define REGISTER_DATA_PIN   7
+// CD4094 CLOCK pin; shared by all of them
 #define REGISTER_CLOCK_PIN  8
+// CD4094 OUTPUT ENABLE pin; shared by all of them
 #define REGISTER_OUTPUT_ENABLE_PIN 9
+// Brightness adjustment input; expected to be the output of a potentiometer between 5V and GND
 #define BRIGHTNESS_ADJUST_PIN  A0
+// Minute advance button input; expected to be a normally open signal, pulled up internally and
+// connected to GND when depressed
 #define MINUTE_ADVANCE_BUTTON_PIN 10
+// Hour advance button input; expected to be a normally open signal, pulled up internally and
+// connected to GND when depressed
 #define HOUR_ADVANCE_BUTTON_PIN 11
+// Amount of time to hold the CD4094 STROBE signal high after a write
 #define REGISTER_STROBE_DURATION_MS 2
 
 // Tuneable software constants
-#define BUTTON_DEBOUNCE_MILLIS 100
+// How long a button's state must be constant before we treat it as valid
+#define BUTTON_DEBOUNCE_MS 100
+// How long a button must be held before we assume the user wants another action
+#define BUTTON_HOLD_ACTION_REPEAT_PERIOD 1500
+// How long all buttons must be released before we assume the user is done setting the time
+#define BUTTON_INACTION_RTC_UPDATE_DELAY 5000
+// How often we query the RTC for the current time during normal operation
 #define RTC_QUERY_PERIOD_MILLIS 5000
-#define RTC_RESET_YEAR    2016
+// What time we reset the RTC to in the event that it's lost its power
+#define RTC_RESET_YEAR    2017
 #define RTC_RESET_MONTH   1
 #define RTC_RESET_DAY     1
 #define RTC_RESET_HOUR    0
@@ -64,12 +81,29 @@ typedef enum {
 } word_bit_map;
 
 // Global state
-static uint32_t localWordRegister = 0;
+// The current time, as understood locally
 static uint8_t currentHour = 0;
 static uint8_t currentMinute = 0;
 static uint8_t currentSecond = 0;
+// Whether or not the time has been adjusted locally through the use of the time adjustment buttons
 static bool timeLocallyUpdated = false;
+// The current time, as understood locally, encoded such that each bit indicates the presence of
+// a given word in word_bit_map
+static uint32_t localWordRegister = 0;
+// Shared reference to the RTC chip
 static RTC_DS3231 rtc;
+
+
+/**
+ * Get a specific byte of a number, where byte 0 is the least significant, byte 1 is one higher, etc.
+ */
+uint8_t getByte(uint32_t number, uint8_t byteIndex) {
+  uint32_t mask = 0xFF << (byteIndex * BITS_PER_BYTE);
+  uint32_t masked = number & mask;
+  uint32_t targetByte = masked >> (byteIndex * BITS_PER_BYTE);
+  
+  return targetByte;
+}
 
 
 /**
@@ -87,18 +121,6 @@ void enableWord(word_bit_map theWord) {
  */
 void disableAllWords() {
   localWordRegister = 0;
-}
-
-
-/**
- * Get a specific byte of a number, where byte 0 is the least significant, byte 1 is one higher, etc.
- */
-uint8_t getByte(uint32_t number, uint8_t byteIndex) {
-  uint32_t mask = 0xFF << (byteIndex * BITS_PER_BYTE);
-  uint32_t masked = number & mask;
-  uint32_t targetByte = masked >> (byteIndex * BITS_PER_BYTE);
-  
-  return targetByte;
 }
 
 
@@ -255,6 +277,18 @@ void updateDisplay(uint8_t hour, uint8_t minute) {
 
 
 /**
+ * Update the clock display, as well as our local time, using the RTC's reported time
+ */
+void updateDisplayFromRTC() {
+  DateTime timeRTC = rtc.now();
+  currentHour = timeRTC.hour();
+  currentMinute = timeRTC.minute();
+  currentSecond = timeRTC.second();
+  updateDisplay(currentHour, currentMinute);
+}
+
+
+/**
  * Test the display, one word at a time
  */
 void testDisplay1() {
@@ -310,11 +344,9 @@ void setup() {
 
   // If the RTC's lost power, reset it
   if (rtc.lostPower()) {
-    rtc.adjust(DateTime(RTC_RESET_YEAR, RTC_RESET_MONTH, RTC_RESET_DAY, RTC_RESET_HOUR, RTC_RESET_MINUTE, RTC_RESET_SECOND));
+    rtc.adjust(DateTime(RTC_RESET_YEAR, RTC_RESET_MONTH, RTC_RESET_DAY,
+                        RTC_RESET_HOUR, RTC_RESET_MINUTE, RTC_RESET_SECOND));
   }
-  
-  // display the current time
-  DateTime now = rtc.now();
 }
 
 
@@ -376,20 +408,23 @@ static uint8_t minuteAfter(uint8_t minute) {
  * @todo duplicated code
  */
 void handleTimeAdjustButtons() {
+  // Debouncing variables
   static unsigned long lastHourButtonChange = 0;
   static unsigned long lastMinuteButtonChange = 0;
   static int lastHourButtonValue = 1;
   static int lastMinuteButtonValue = 1;
+  // Variables to enable holding a time adjust button to gradually change the time
   static bool hourButtonBeingHeld = false;
   static bool minuteButtonBeingHeld = false;
   static unsigned long nextHourAdvanceTime = 0;
   static unsigned long nextMinuteAdvanceTime = 0;
-
   static unsigned long updateRTCTime = 0;
+
 
   int hourButtonValue = digitalRead(HOUR_ADVANCE_BUTTON_PIN);
   int minuteButtonValue = digitalRead(MINUTE_ADVANCE_BUTTON_PIN);
 
+  // Debouncing logic
   int timeNow = millis();
   if (hourButtonValue != lastHourButtonValue) {
     lastHourButtonChange = timeNow;
@@ -398,7 +433,7 @@ void handleTimeAdjustButtons() {
     lastMinuteButtonChange = timeNow;
   }
 
-  if ((timeNow - lastHourButtonChange) > BUTTON_DEBOUNCE_MILLIS) {
+  if ((timeNow - lastHourButtonChange) > BUTTON_DEBOUNCE_MS) {
     // the button state is settled
     // if it's being depressed (connected to ground), then increment the hour once immediately
     // and then once every two seconds
@@ -407,23 +442,23 @@ void handleTimeAdjustButtons() {
         currentHour = hourAfter(currentHour);
         currentSecond = 0;
         timeLocallyUpdated = true;
-        nextHourAdvanceTime = timeNow + 2000;
-        updateRTCTime = timeNow + 5000;
+        nextHourAdvanceTime = timeNow + BUTTON_HOLD_ACTION_REPEAT_PERIOD;
+        updateRTCTime = timeNow + BUTTON_INACTION_RTC_UPDATE_DELAY;
         updateDisplay(currentHour, currentMinute);
         hourButtonBeingHeld = true;
       } else if (timeNow >= nextHourAdvanceTime) {
         currentHour = hourAfter(currentHour);
         currentSecond = 0;
-        nextHourAdvanceTime = timeNow + 2000;
+        nextHourAdvanceTime = timeNow + BUTTON_HOLD_ACTION_REPEAT_PERIOD;
         updateDisplay(currentHour, currentMinute);
-        updateRTCTime = timeNow + 5000;
+        updateRTCTime = timeNow + BUTTON_INACTION_RTC_UPDATE_DELAY;
       }
     } else {
       hourButtonBeingHeld = false;
     }
   }
 
-  if ((timeNow - lastMinuteButtonChange) > BUTTON_DEBOUNCE_MILLIS) {
+  if ((timeNow - lastMinuteButtonChange) > BUTTON_DEBOUNCE_MS) {
     // the button state is settled
     // if it's being depressed (connected to ground), then increment the minute once immediately
     // and then once every two seconds
@@ -432,15 +467,15 @@ void handleTimeAdjustButtons() {
         currentMinute = minuteAfter(currentMinute);
         currentSecond = 0;
         timeLocallyUpdated = true;
-        nextMinuteAdvanceTime = timeNow + 2000;
-        updateRTCTime = timeNow + 5000;
+        nextMinuteAdvanceTime = timeNow + BUTTON_HOLD_ACTION_REPEAT_PERIOD;
+        updateRTCTime = timeNow + BUTTON_INACTION_RTC_UPDATE_DELAY;
         updateDisplay(currentHour, currentMinute);
         minuteButtonBeingHeld = true;
       } else if (timeNow >= nextMinuteAdvanceTime) {
         currentMinute = minuteAfter(currentMinute);
         currentSecond = 0;
-        nextMinuteAdvanceTime = timeNow + 2000;
-        updateRTCTime = timeNow + 5000;
+        nextMinuteAdvanceTime = timeNow + BUTTON_HOLD_ACTION_REPEAT_PERIOD;
+        updateRTCTime = timeNow + BUTTON_INACTION_RTC_UPDATE_DELAY;
         updateDisplay(currentHour, currentMinute);
       }
     } else {
@@ -470,11 +505,7 @@ void loop() {
   unsigned long timeNow = millis();
   if ((timeNow - lastRTCQueryTime) > RTC_QUERY_PERIOD_MILLIS) {
     if (timeLocallyUpdated == false) {
-      DateTime timeRTC = rtc.now();
-      currentHour = timeRTC.hour();
-      currentMinute = timeRTC.minute();
-      currentSecond = timeRTC.second();
-      updateDisplay(currentHour, currentMinute);
+      updateDisplayFromRTC();
       lastRTCQueryTime = timeNow;
     }
   }
