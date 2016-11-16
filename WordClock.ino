@@ -18,13 +18,13 @@
 // CD4094 STROBE pin; shared by all of them
 #define REGISTER_STROBE_PIN 6
 // CD4094 DATA pin; fed only to the first one
-#define REGISTER_DATA_PIN   7
+#define REGISTER_DATA_PIN 7
 // CD4094 CLOCK pin; shared by all of them
-#define REGISTER_CLOCK_PIN  8
+#define REGISTER_CLOCK_PIN 8
 // CD4094 OUTPUT ENABLE pin; shared by all of them
 #define REGISTER_OUTPUT_ENABLE_PIN 9
 // Brightness adjustment input; expected to be the output of a potentiometer between 5V and GND
-#define BRIGHTNESS_ADJUST_PIN  A0
+#define BRIGHTNESS_ADJUST_PIN A0
 // Minute advance button input; expected to be a normally open signal, pulled up internally and
 // connected to GND when depressed
 #define MINUTE_ADVANCE_BUTTON_PIN 10
@@ -39,7 +39,8 @@
 #define BUTTON_DEBOUNCE_MS 100
 // How long a button must be held before we assume the user wants another action
 #define BUTTON_HOLD_ACTION_REPEAT_PERIOD 1500
-// How long all buttons must be released before we assume the user is done setting the time
+// How long to wait after the last time adjustment before we assume the user is done setting the time
+// This should be at least a few milliseconds longer than BUTTON_HOLD_ACTION_REPEAT_PERIOD
 #define BUTTON_INACTION_RTC_UPDATE_DELAY 5000
 // How often we query the RTC for the current time during normal operation
 #define RTC_QUERY_PERIOD_MILLIS 5000
@@ -371,7 +372,7 @@ void handleBrightnessControl() {
     // map [100, 923] to [0, 255]
     double divideFactor = (923-100) / 255;
     double pwmDutyDouble = ((double)(analogBrightnessValue - 100)) / 3.23;
-    pwmDuty = (int) pwmDutyDouble;
+    pwmDuty = pwmDutyDouble;
   }
 
   digitalWrite(REGISTER_OUTPUT_ENABLE_PIN, pwmDuty);
@@ -436,7 +437,7 @@ void handleTimeAdjustButtons() {
   if ((timeNow - lastHourButtonChange) > BUTTON_DEBOUNCE_MS) {
     // the button state is settled
     // if it's being depressed (connected to ground), then increment the hour once immediately
-    // and then once every two seconds
+    // and then once every so often until released
     if (hourButtonValue == LOW) {
       if (hourButtonBeingHeld == false) {
         currentHour = hourAfter(currentHour);
@@ -461,7 +462,7 @@ void handleTimeAdjustButtons() {
   if ((timeNow - lastMinuteButtonChange) > BUTTON_DEBOUNCE_MS) {
     // the button state is settled
     // if it's being depressed (connected to ground), then increment the minute once immediately
-    // and then once every two seconds
+    // and then once every so often until released
     if (minuteButtonValue == LOW) {
       if (minuteButtonBeingHeld == false) {
         currentMinute = minuteAfter(currentMinute);
