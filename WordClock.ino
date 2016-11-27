@@ -22,15 +22,17 @@
 // CD4094 CLOCK pin; shared by all of them
 #define REGISTER_CLOCK_PIN 8
 // CD4094 OUTPUT ENABLE pin; shared by all of them
-#define REGISTER_OUTPUT_ENABLE_PIN 9
+#define REGISTER_OUTPUT_ENABLE_PIN 10
 // Brightness adjustment input; expected to be the output of a potentiometer between 5V and GND
 #define BRIGHTNESS_ADJUST_PIN A0
 // Minute advance button input; expected to be a normally open signal, pulled up internally and
 // connected to GND when depressed
-#define MINUTE_ADVANCE_BUTTON_PIN 10
+#define MINUTE_ADVANCE_BUTTON_PIN 2
 // Hour advance button input; expected to be a normally open signal, pulled up internally and
 // connected to GND when depressed
-#define HOUR_ADVANCE_BUTTON_PIN 11
+#define HOUR_ADVANCE_BUTTON_PIN 3
+//@debug Debug LED pin; used for debugging
+#define DEBUG_LED_PIN 9
 // Amount of time to hold the CD4094 STROBE signal high after a write
 #define REGISTER_STROBE_DURATION_MS 2
 
@@ -99,9 +101,8 @@ static RTC_DS3231 rtc;
  * Get a specific byte of a number, where byte 0 is the least significant, byte 1 is one higher, etc.
  */
 uint8_t getByte(uint32_t number, uint8_t byteIndex) {
-  uint32_t mask = 0xFF << (byteIndex * BITS_PER_BYTE);
-  uint32_t masked = number & mask;
-  uint32_t targetByte = masked >> (byteIndex * BITS_PER_BYTE);
+  uint32_t shifted = number >> (byteIndex * BITS_PER_BYTE);
+  uint8_t targetByte = shifted & 0xFF;
   
   return targetByte;
 }
@@ -112,7 +113,8 @@ uint8_t getByte(uint32_t number, uint8_t byteIndex) {
  * Note that this function will not update the display - to do so call flushWordRegister()
  */
 void enableWord(word_bit_map theWord) {
-  localWordRegister |= (1 << theWord);
+  uint32_t mask = ((uint32_t) 0x01) << theWord;
+  localWordRegister |= mask;
 }
 
 
@@ -332,21 +334,28 @@ void setup() {
   pinMode(REGISTER_DATA_PIN, OUTPUT);
   pinMode(REGISTER_CLOCK_PIN, OUTPUT);
   pinMode(REGISTER_OUTPUT_ENABLE_PIN, OUTPUT);
+  pinMode(DEBUG_LED_PIN, OUTPUT); //@debug
   
   pinMode(BRIGHTNESS_ADJUST_PIN, INPUT);
   pinMode(MINUTE_ADVANCE_BUTTON_PIN, INPUT_PULLUP);
   pinMode(HOUR_ADVANCE_BUTTON_PIN, INPUT_PULLUP);
-
+  
+  /*
   testDisplay1();
   testDisplay2();
+  */
 
   //@todo consider doing something on RTC failure
   rtc.begin();
+
+  digitalWrite(DEBUG_LED_PIN, HIGH); //@debug
 
   // If the RTC's lost power, reset it
   if (rtc.lostPower()) {
     rtc.adjust(DateTime(RTC_RESET_YEAR, RTC_RESET_MONTH, RTC_RESET_DAY,
                         RTC_RESET_HOUR, RTC_RESET_MINUTE, RTC_RESET_SECOND));
+
+    digitalWrite(DEBUG_LED_PIN, LOW); //@debug
   }
 }
 
