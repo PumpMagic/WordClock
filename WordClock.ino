@@ -44,6 +44,10 @@
 // How long to wait after the last time adjustment before we assume the user is done setting the time
 // This should be at least a few milliseconds longer than BUTTON_HOLD_ACTION_REPEAT_PERIOD
 #define BUTTON_INACTION_RTC_UPDATE_DELAY 5000
+// If our ADC read returns a value lower than this, we treat it as minimum
+#define POTENTIOMETER_ERROR_MARGIN_LOW 50
+// If our ADC read returns a value higher than this, we treat it as maximum
+#define POTENTIOMETER_ERROR_MARGIN_HIGH 973
 // How often we query the RTC for the current time during normal operation
 #define RTC_QUERY_PERIOD_MILLIS 5000
 // What time we reset the RTC to in the event that it's lost its power
@@ -56,6 +60,7 @@
 
 // Non-tuneable software constants
 #define BITS_PER_BYTE 8
+#define PWM_DUTY_MAX 255
 
 // Word bit positions
 #define WORD_BIT_MAX 20
@@ -349,7 +354,6 @@ void setup() {
   rtc.begin();
 
   digitalWrite(DEBUG_LED_PIN, HIGH); //@debug
-
   // If the RTC's lost power, reset it
   if (rtc.lostPower()) {
     rtc.adjust(DateTime(RTC_RESET_YEAR, RTC_RESET_MONTH, RTC_RESET_DAY,
@@ -369,22 +373,27 @@ void handleBrightnessControl() {
   int analogBrightnessValue = analogRead(BRIGHTNESS_ADJUST_PIN);
 
   // Map the read analog value to a PWM duty cycle value
-  // analogRead returns [0, 1023] for [0, 5]V. The voltage range is actually less thanks to nonideal potentiometer
+  // analogRead returns [0, 1023] for [0, VCC]V. The voltage range is actually less thanks to nonideal potentiometer
   // properties and finite pin input impedance, so condense it
-  // The output PWM duty cycle range is [0, 255]
-  int pwmDuty = 255;
-  if (analogBrightnessValue < 100) {
+  // The output PWM duty cycle range is [0, PWM_DUTY_MAX]
+  int pwmDuty = PWM_DUTY_MAX;
+  if (analogBrightnessValue < POTENTIOMETER_ERROR_MARGIN_LOW) {
     pwmDuty = 0;
-  } else if (analogBrightnessValue >= 924) {
-    pwmDuty = 255;
+  } else if (analogBrightnessValue > POTENTIOMETER_ERROR_MARGIN_HIGH) {
+    pwmDuty = PWM_DUTY_MAX;
   } else {
-    // map [100, 923] to [0, 255]
-    double divideFactor = (923-100) / 255;
-    double pwmDutyDouble = ((double)(analogBrightnessValue - 100)) / 3.23;
+    // map [POTENTIOMETER_ERROR_MARGIN_LOW, POTENTIOMETER_ERROR_MARGIN_HIGH] to [0, PWM_DUTY_MAX]
+    double divideFactor = ((double)(POTENTIOMETER_ERROR_MARGIN_HIGH-POTENTIOMETER_ERROR_MARGIN_LOW)) / ((double)PWM_DUTY_MAX);
+    double pwmDutyDouble = ((double)(analogBrightnessValue - POTENTIOMETER_ERROR_MARGIN_LOW)) / divideFactor;
     pwmDuty = pwmDutyDouble;
   }
 
-  digitalWrite(REGISTER_OUTPUT_ENABLE_PIN, pwmDuty);
+  // For safety, in case of rounding or human errors - limit the PWM duty cycle
+  if (pwmDuty > PWM_DUTY_MAX) {
+    pwmDuty = PWM_DUTY_MAX;
+  }
+
+  analogWrite(REGISTER_OUTPUT_ENABLE_PIN, pwmDuty);
 }
 
 
