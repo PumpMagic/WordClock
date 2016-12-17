@@ -16,21 +16,21 @@
 
 // Hardware constants
 // CD4094 STROBE pin; shared by all of them
-#define REGISTER_STROBE_PIN 6
+#define REGISTER_STROBE_PIN 8
 // CD4094 DATA pin; fed only to the first one
 #define REGISTER_DATA_PIN 7
 // CD4094 CLOCK pin; shared by all of them
-#define REGISTER_CLOCK_PIN 8
+#define REGISTER_CLOCK_PIN 6
 // CD4094 OUTPUT ENABLE pin; shared by all of them
-#define REGISTER_OUTPUT_ENABLE_PIN 10
+#define REGISTER_OUTPUT_ENABLE_PIN 5
 // Brightness adjustment input; expected to be the output of a potentiometer between 5V and GND
-#define BRIGHTNESS_ADJUST_PIN A0
+#define BRIGHTNESS_ADJUST_PIN A1
 // Minute advance button input; expected to be a normally open signal, pulled up internally and
 // connected to GND when depressed
-#define MINUTE_ADVANCE_BUTTON_PIN 2
+#define MINUTE_ADVANCE_BUTTON_PIN 3
 // Hour advance button input; expected to be a normally open signal, pulled up internally and
 // connected to GND when depressed
-#define HOUR_ADVANCE_BUTTON_PIN 3
+#define HOUR_ADVANCE_BUTTON_PIN 2
 //@debug Debug LED pin; used for debugging
 #define DEBUG_LED_PIN 9
 // Amount of time to hold the CD4094 STROBE signal high after a write
@@ -64,29 +64,30 @@
 #define MS_PER_SECOND 1000UL
 
 // Word bit positions
-#define WORD_BIT_MAX 20
+#define WORD_BIT_MAX 23
 typedef enum {
-  TEN_M     = 20,
-  HALF_M    = 19,
-  QUARTER_M = 18,
-  TWENTY_M  = 17,
-  FIVE_M    = 16,
-  MINUTES   = 15,
-  PAST      = 14,
-  TO        = 13,
-  ONE_H     = 12,
-  TWO_H     = 11,
-  THREE_H   = 10,
-  FOUR_H    = 9,
-  FIVE_H    = 8,
-  SIX_H     = 7,
-  SEVEN_H   = 6,
+  IT_IS     = 16,
+  TEN_M     = 8,
+  HALF_M    = 7,
+  QUARTER_M = 9,
+  TWENTY_M  = 0,
+  FIVE_M    = 17,
+  MINUTES   = 1,
+  PAST      = 18,
+  TO        = 10,
+  ONE_H     = 2,
+  TWO_H     = 3,
+  THREE_H   = 19,
+  FOUR_H    = 11,
+  FIVE_H    = 4,
+  SIX_H     = 20,
+  SEVEN_H   = 12,
   EIGHT_H   = 5,
-  NINE_H    = 4,
-  TEN_H     = 3,
-  ELEVEN_H  = 2,
-  TWELVE_H  = 1,
-  OCLOCK    = 0
+  NINE_H    = 21,
+  TEN_H     = 13,
+  ELEVEN_H  = 6,
+  TWELVE_H  = 22,
+  OCLOCK    = 14
 } word_bit_map;
 
 // Global state
@@ -163,6 +164,8 @@ void updateLocalWordRegister(uint8_t hour, uint8_t minute) {
   if (hour > 12) { hour = hour - 12; }
   if (hour == 0) { hour = 12; }
 
+  enableWord(IT_IS);
+
   // Handle the "minute" part of the time
   if (minute < 5) {
     enableWord(OCLOCK);
@@ -171,19 +174,23 @@ void updateLocalWordRegister(uint8_t hour, uint8_t minute) {
   } else if (minute >= 10 && minute < 15) { 
     enableWord(TEN_M);
   } else if (minute >= 15 && minute < 20) {
-    enableWord(QUARTER_M); 
+    enableWord(QUARTER_M);
   } else if (minute >= 20 && minute < 25) { 
     enableWord(TWENTY_M);
+    enableWord(MINUTES);
   } else if (minute >= 25 && minute < 30) { 
     enableWord(TWENTY_M);
     enableWord(FIVE_M);
+    enableWord(MINUTES);
   } else if (minute >= 30 && minute < 35) {
     enableWord(HALF_M);
   } else if (minute >= 35 && minute < 40) { 
     enableWord(TWENTY_M);
     enableWord(FIVE_M);
+    enableWord(MINUTES);
   } else if (minute >= 40 && minute < 45) { 
     enableWord(TWENTY_M);
+    enableWord(MINUTES);
   } else if (minute >= 45 && minute < 50) {
     enableWord(QUARTER_M);
   } else if (minute >= 50 && minute < 55) { 
@@ -307,11 +314,16 @@ void updateDisplayFromRTC() {
  * Test the display, one word at a time
  */
 void testDisplay1() {
-  for (uint8_t i = 0; i <= WORD_BIT_MAX; i++) {
+  int order[] = { IT_IS, TEN_M, HALF_M, QUARTER_M, TWENTY_M, FIVE_M, MINUTES, PAST, TO, ONE_H,
+                  THREE_H, FOUR_H, FIVE_H, SIX_H, SEVEN_H, EIGHT_H, NINE_H, TEN_H, ELEVEN_H, TWELVE_H, OCLOCK };
+
+  int numWords = sizeof(order)/sizeof(order[0]);
+  
+  for (uint8_t i = 0; i < numWords; i++) {
     disableAllWords();
-    enableWord(i);
+    enableWord(order[i]);
     flushWordRegister();
-    delay(500);
+    delay(100);
   }
 }
 
@@ -351,11 +363,8 @@ void setup() {
   pinMode(BRIGHTNESS_ADJUST_PIN, INPUT);
   pinMode(MINUTE_ADVANCE_BUTTON_PIN, INPUT_PULLUP);
   pinMode(HOUR_ADVANCE_BUTTON_PIN, INPUT_PULLUP);
-  
-  /*
-  testDisplay1();
-  testDisplay2();
-  */
+
+  analogWrite(REGISTER_OUTPUT_ENABLE_PIN, 0);
 
   //@todo consider doing something on RTC failure
   rtc.begin();
@@ -370,6 +379,8 @@ void setup() {
 
   updateDisplayFromRTC();
   lastRTCQueryTime = millis();
+
+  delay(1000);
 }
 
 
