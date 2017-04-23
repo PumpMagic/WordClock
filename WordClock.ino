@@ -22,17 +22,17 @@
 // CD4094 CLOCK pin; shared by all of them
 #define REGISTER_CLOCK_PIN 6
 // CD4094 OUTPUT ENABLE pin; shared by all of them
-#define REGISTER_OUTPUT_ENABLE_PIN 5
+#define REGISTER_OUTPUT_ENABLE_PIN 9
 // Brightness adjustment input; expected to be the output of a potentiometer between 5V and GND
-#define BRIGHTNESS_ADJUST_PIN A1
+#define BRIGHTNESS_ADJUST_PIN A2
 // Minute advance button input; expected to be a normally open signal, pulled up internally and
 // connected to GND when depressed
-#define MINUTE_ADVANCE_BUTTON_PIN 3
+#define MINUTE_ADVANCE_BUTTON_PIN A1
 // Hour advance button input; expected to be a normally open signal, pulled up internally and
 // connected to GND when depressed
-#define HOUR_ADVANCE_BUTTON_PIN 2
+#define HOUR_ADVANCE_BUTTON_PIN A0
 //@debug Debug LED pin; used for debugging
-#define DEBUG_LED_PIN 9
+#define DEBUG_LED_PIN 5
 // Amount of time to hold the CD4094 STROBE signal high after a write
 #define REGISTER_STROBE_DURATION_MS 2
 
@@ -66,28 +66,28 @@
 // Word bit positions
 #define WORD_BIT_MAX 23
 typedef enum {
-  IT_IS     = 16,
-  TEN_M     = 8,
-  HALF_M    = 7,
-  QUARTER_M = 9,
-  TWENTY_M  = 0,
-  FIVE_M    = 17,
-  MINUTES   = 1,
-  PAST      = 18,
-  TO        = 10,
-  ONE_H     = 2,
-  TWO_H     = 3,
+  IT_IS     = 9,
+  TEN_M     = 13,
+  HALF_M    = 4,
+  QUARTER_M = 11,
+  TWENTY_M  = 2,
+  FIVE_M    = 22,
+  MINUTES   = 14,
+  PAST      = 20,
+  TO        = 21,
+  ONE_H     = 0,
+  TWO_H     = 5,
   THREE_H   = 19,
-  FOUR_H    = 11,
-  FIVE_H    = 4,
-  SIX_H     = 20,
-  SEVEN_H   = 12,
-  EIGHT_H   = 5,
-  NINE_H    = 21,
-  TEN_H     = 13,
-  ELEVEN_H  = 6,
-  TWELVE_H  = 22,
-  OCLOCK    = 14
+  FOUR_H    = 12,
+  FIVE_H    = 6,
+  SIX_H     = 18,
+  SEVEN_H   = 10,
+  EIGHT_H   = 3,
+  NINE_H    = 17,
+  TEN_H     = 8,
+  ELEVEN_H  = 1,
+  TWELVE_H  = 16,
+  OCLOCK    = 7
 } word_bit_map;
 
 // Global state
@@ -311,10 +311,18 @@ void updateDisplayFromRTC() {
 
 
 /**
- * Test the display, one word at a time
+ * Set the brightness of the display
+ * Input range is [0, PWM_DUTY_MAX]
+ */
+ void setBrightness(uint8_t brightness) {
+  analogWrite(REGISTER_OUTPUT_ENABLE_PIN, brightness);
+ }
+
+/**
+ * Test the display by pulsing each word, one at a time
  */
 void testDisplay1() {
-  int order[] = { IT_IS, TEN_M, HALF_M, QUARTER_M, TWENTY_M, FIVE_M, MINUTES, PAST, TO, ONE_H,
+  int order[] = { IT_IS, TEN_M, HALF_M, QUARTER_M, TWENTY_M, FIVE_M, MINUTES, PAST, TO, ONE_H, TWO_H,
                   THREE_H, FOUR_H, FIVE_H, SIX_H, SEVEN_H, EIGHT_H, NINE_H, TEN_H, ELEVEN_H, TWELVE_H, OCLOCK };
 
   int numWords = sizeof(order)/sizeof(order[0]);
@@ -323,8 +331,39 @@ void testDisplay1() {
     disableAllWords();
     enableWord(order[i]);
     flushWordRegister();
+    uint8_t a = 0;
+    for (a = 0; a < PWM_DUTY_MAX; a++) {
+      setBrightness(a);
+      delay(3);
+    }
+    for (a = PWM_DUTY_MAX; a > 0; a--) {
+      setBrightness(a);
+      delay(3);
+    }
+  }
+
+  setBrightness(0);
+}
+
+/**
+ * Test the display by lighting each word quickly, one at a time
+ */
+void testDisplay2() {
+  int order[] = { IT_IS, TEN_M, HALF_M, QUARTER_M, TWENTY_M, FIVE_M, MINUTES, PAST, TO, ONE_H, TWO_H,
+                  THREE_H, FOUR_H, FIVE_H, SIX_H, SEVEN_H, EIGHT_H, NINE_H, TEN_H, ELEVEN_H, TWELVE_H, OCLOCK };
+
+  int numWords = sizeof(order)/sizeof(order[0]);
+
+  setBrightness(100);
+  
+  for (uint8_t i = 0; i < numWords; i++) {
+    disableAllWords();
+    enableWord(order[i]);
+    flushWordRegister();
     delay(100);
   }
+
+  setBrightness(0);
 }
 
 
@@ -333,9 +372,11 @@ void testDisplay1() {
  * Do this on a simulation time scale where 1 second in real life = 5 simulated minutes
  * i.e., this test takes (24*60/5) = 288 seconds to complete
  */
-void testDisplay2() {
+void testDisplay3() {
   uint8_t hour = 0;
   uint8_t minute = 0;
+
+  setBrightness(100);
 
   while (hour < 24) {
     updateDisplay(hour, minute);
@@ -346,6 +387,8 @@ void testDisplay2() {
       minute = 0;
     }
   }
+
+  setBrightness(0);
 }
 
 
@@ -354,6 +397,7 @@ void testDisplay2() {
  * This gets called automatically on boot
  */
 void setup() {
+  // Configure all of our pins
   pinMode(REGISTER_STROBE_PIN, OUTPUT);
   pinMode(REGISTER_DATA_PIN, OUTPUT);
   pinMode(REGISTER_CLOCK_PIN, OUTPUT);
@@ -364,23 +408,35 @@ void setup() {
   pinMode(MINUTE_ADVANCE_BUTTON_PIN, INPUT_PULLUP);
   pinMode(HOUR_ADVANCE_BUTTON_PIN, INPUT_PULLUP);
 
-  analogWrite(REGISTER_OUTPUT_ENABLE_PIN, 0);
+  // Turn off the display for now. The brightness control function will set this later
+  setBrightness(0);
 
   //@todo consider doing something on RTC failure
   rtc.begin();
 
-  digitalWrite(DEBUG_LED_PIN, HIGH); //@debug
   // If the RTC's lost power, reset it
   if (rtc.lostPower()) {
     rtc.adjust(DateTime(RTC_RESET_YEAR, RTC_RESET_MONTH, RTC_RESET_DAY,
                         RTC_RESET_HOUR, RTC_RESET_MINUTE, RTC_RESET_SECOND));
-    digitalWrite(DEBUG_LED_PIN, LOW); //@debug
+  }
+
+  int hourAdvance = digitalRead(HOUR_ADVANCE_BUTTON_PIN);
+  int minuteAdvance = digitalRead(MINUTE_ADVANCE_BUTTON_PIN);
+
+  if (hourAdvance == LOW || minuteAdvance == LOW) {
+    delay(1000);
+    
+    if (hourAdvance == HIGH && minuteAdvance == LOW) {
+      testDisplay1();
+    } else if (hourAdvance == LOW && minuteAdvance == HIGH) {
+      testDisplay2();
+    } else if (hourAdvance == LOW && minuteAdvance == LOW) {
+      testDisplay3();
+    }
   }
 
   updateDisplayFromRTC();
   lastRTCQueryTime = millis();
-
-  delay(1000);
 }
 
 
@@ -413,7 +469,7 @@ void handleBrightnessControl() {
     pwmDuty = PWM_DUTY_MAX;
   }
 
-  analogWrite(REGISTER_OUTPUT_ENABLE_PIN, pwmDuty);
+  setBrightness(pwmDuty);
 }
 
 
