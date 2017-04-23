@@ -442,7 +442,6 @@ void setup() {
 
 /**
  * Handle the external brightness control
- * @todo consider adding schmitt triggers to handle hysteresis
  */
 void handleBrightnessControl() {
   // Read the analog brightness pin
@@ -517,7 +516,6 @@ void handleTimeAdjustButtons() {
   static unsigned long nextHourAdvanceTime = 0;
   static unsigned long nextMinuteAdvanceTime = 0;
   static unsigned long updateRTCTime = 0;
-
 
   int hourButtonValue = digitalRead(HOUR_ADVANCE_BUTTON_PIN);
   int minuteButtonValue = digitalRead(MINUTE_ADVANCE_BUTTON_PIN);
